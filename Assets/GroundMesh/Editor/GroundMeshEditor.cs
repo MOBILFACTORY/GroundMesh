@@ -9,6 +9,7 @@ public class GroundMeshEditor : Editor
 {
     private enum EditMode
     {
+        Lock,
         Vertex,
         UV,
     }
@@ -27,36 +28,54 @@ public class GroundMeshEditor : Editor
     private readonly KeyCode KeyBrushRotatePlus = KeyCode.E;
     private readonly KeyCode KeyUndo = KeyCode.Z;
     private readonly KeyCode KeyRedo = KeyCode.Y;
-
-    private bool _lock = true;
+    
+    private EditMode _editMode = EditMode.Lock;
     private Rect _winsize = new Rect(10, 30, 10, 10);
     private Vector3 _mouse;
     private Matrix4x4 _worldToLocal;
-    private EditMode _editMode = EditMode.Vertex;
-    private bool _init = false;
+    private List<Vector3> _vertices;
+    private List<Vector2> _uv;
+    private List<int> _triangles;
+    private Dictionary <string, List<int>> _indexCache;
     private int _selectedTexIdx = 0;
     private int _texRotation = 0;
 
-    [SerializeField]
-    public List<Vector3> vertices = new List<Vector3>();
-    [SerializeField]
-    public List<Vector2> uv = new List<Vector2>();
+    private SerializedProperty _serializedVertices;
+
+    void OnEnable()
+    {
+        Tools.current = Tool.View;
+        
+        var ground = target as GroundMesh;
+        var mesh = ground.GetComponent<MeshFilter>().sharedMesh;
+        if (mesh != null)
+        {
+            _vertices = new List<Vector3>(mesh.vertices);
+            _uv = new List<Vector2>(mesh.uv);
+            _triangles = new List<int>(mesh.triangles);
+        }
+        else
+        {
+            _vertices = new List<Vector3>();
+            _uv = new List<Vector2>();
+            _triangles = new List<int>();
+        }
+
+        _indexCache = GetIndexDict();
+    }
 
     public override void OnInspectorGUI()
     {
+        var ground = target as GroundMesh;
+
         base.OnInspectorGUI();
 
-        var ground = target as GroundMesh;
         if (GUILayout.Button("New Mesh"))
         {
             if (!EditorUtility.DisplayDialog("New", "Are you sure?", "New", "Cancel"))
                 return;
 
-            if (ground.GetComponent<MeshCollider>() != null)
-                DestroyImmediate(ground.GetComponent<MeshCollider>());
-
-            ground.NewMesh();
-            EditorUtility.UnloadUnusedAssets();
+            NewMesh();
         }
         else if (GUILayout.Button("Resize Mesh"))
         {
@@ -67,11 +86,14 @@ public class GroundMeshEditor : Editor
                     return;
             }
 
-            if (ground.GetComponent<MeshCollider>() != null)
-                DestroyImmediate(ground.GetComponent<MeshCollider>());
-
-            ground.ResizeMesh();
-            EditorUtility.UnloadUnusedAssets();
+            ResizeMesh();
+        }
+        else if (GUILayout.Button("Init UV"))
+        {
+            if (!EditorUtility.DisplayDialog("Init UV", "Are you sure?", "New", "Cancel"))
+                return;
+            
+            InitUV();
         }
         else if (GUILayout.Button("Create MeshCollider"))
         {
@@ -80,18 +102,175 @@ public class GroundMeshEditor : Editor
 
             ground.gameObject.AddComponent<MeshCollider>();
         }
-        else if (GUILayout.Button("Clean"))
+        else if (GUILayout.Button(string.Format("Clean History ({0}/{1})", ground._historyIndex, ground._histories.Count)))
         {
-            ground.Clean();
+            ground.ClearHistory();
             EditorUtility.UnloadUnusedAssets();
         }
     }
 
+    public void DestroyCollider()
+    {
+        var ground = target as GroundMesh;
+
+        if (ground.GetComponent<MeshCollider>() != null)
+            DestroyImmediate(ground.GetComponent<MeshCollider>());
+
+        EditorUtility.UnloadUnusedAssets();
+    }
+
+    public void NewMesh()
+    {
+        DestroyCollider();
+
+        var ground = target as GroundMesh;
+        
+        _vertices.Clear();
+        _uv.Clear();
+        _triangles.Clear();
+
+        var c = (float)ground.texCountPerRow;
+        var i = 0;
+        for (int y = 0; y < ground.rows; ++y)
+        {
+            for (int x = 0; x < ground.cols; ++x)
+            {
+                _vertices.Add(new Vector3(x, 0, y));
+                _vertices.Add(new Vector3(x + 1, 0, y));
+                _vertices.Add(new Vector3(x + 1, 0, y + 1));
+                _vertices.Add(new Vector3(x, 0, y + 1));
+                
+                _uv.Add(new Vector2(0f, 0f));
+                _uv.Add(new Vector2(1f / c, 0f));
+                _uv.Add(new Vector2(1f / c, 1f / c));
+                _uv.Add(new Vector2(0f, 1f / c));
+                
+                _triangles.Add(i);
+                _triangles.Add(i + 3);
+                _triangles.Add(i + 2);
+                _triangles.Add(i);
+                _triangles.Add(i + 2);
+                _triangles.Add(i + 1);
+                
+                i += 4;
+            }
+        }
+        
+        UpdateMesh();
+    }
+    
+    public void ResizeMesh()
+    {
+        DestroyCollider();
+
+        var ground = target as GroundMesh;
+
+        var oldVertices = new List<Vector3>(_vertices);
+        var oldUV = new List<Vector2>(_uv);
+        
+        _vertices.Clear();
+        _uv.Clear();
+        _triangles.Clear();
+        
+        var c = (float)ground.texCountPerRow;
+        var i = 0;
+        for (int y = 0; y < ground.rows; ++y)
+        {
+            for (int x = 0; x < ground.cols; ++x)
+            {
+                _vertices.Add(new Vector3(x, 0, y));
+                _vertices.Add(new Vector3(x + 1, 0, y));
+                _vertices.Add(new Vector3(x + 1, 0, y + 1));
+                _vertices.Add(new Vector3(x, 0, y + 1));
+                
+                _uv.Add(new Vector2(0f, 0f));
+                _uv.Add(new Vector2(1f / c, 0f));
+                _uv.Add(new Vector2(1f / c, 1f / c));
+                _uv.Add(new Vector2(0f, 1f / c));
+                
+                _triangles.Add(i);
+                _triangles.Add(i + 3);
+                _triangles.Add(i + 2);
+                _triangles.Add(i);
+                _triangles.Add(i + 2);
+                _triangles.Add(i + 1);
+                
+                i += 4;
+            }
+        }
+        
+        var newIndexCache = GetIndexDict();
+        foreach (var pair in _indexCache)
+        {
+            if (!newIndexCache.ContainsKey(pair.Key))
+                continue;
+            
+            var list = newIndexCache[pair.Key];
+            foreach (var idx in list)
+            {
+                foreach (var idx2 in _indexCache[pair.Key])
+                {
+                    _vertices[idx] = oldVertices[idx2];
+                }
+            }
+        }
+        
+        for (int y = 0; y < ground._rows; ++y)
+        {
+            for (int x = 0; x < ground._cols; ++x)
+            {
+                var oldIdx = x  * 4 + (ground._cols * 4 * y);
+                var newIdx = x  * 4 + (ground.cols * 4 * y);
+                if (_uv.Count <= newIdx || oldUV.Count <= oldIdx)
+                    continue;
+                
+                _uv[newIdx + 0] = oldUV[oldIdx + 0];
+                _uv[newIdx + 1] = oldUV[oldIdx + 1];
+                _uv[newIdx + 2] = oldUV[oldIdx + 2];
+                _uv[newIdx + 3] = oldUV[oldIdx + 3];
+            }
+        }
+        
+        UpdateMesh();
+        ground.ClearHistory();
+    }
+
+    private void InitUV()
+    {
+        var ground = target as GroundMesh;
+
+        _uv.Clear();
+        
+        var c = (float)ground.texCountPerRow;
+        for (int y = 0; y < ground.rows; ++y)
+        {
+            for (int x = 0; x < ground.cols; ++x)
+            {        
+                _uv.Add(new Vector2(0f, 0f));
+                _uv.Add(new Vector2(1f / c, 0f));
+                _uv.Add(new Vector2(1f / c, 1f / c));
+                _uv.Add(new Vector2(0f, 1f / c));
+            }
+        }
+        
+        UpdateMesh();
+    }
+
+    private void UpdateMesh()
+    {
+        var ground = target as GroundMesh;
+        
+        ground._cols = ground.cols;
+        ground._rows = ground.rows;
+        
+        ground.UpdateMesh(_vertices, _uv, _triangles);
+
+        _indexCache = GetIndexDict();
+    }
+
     private void OnSceneGUI()
     {
-        Init();
-
-        if (!_lock)
+        if (_editMode != EditMode.Lock)
         {
             OnKey();
             OnMouse();
@@ -101,10 +280,9 @@ public class GroundMeshEditor : Editor
 
         DrawCursorIndex();
 
-        if (_lock)
+        if (_editMode == EditMode.Lock)
             return;
-
-        if (_editMode == EditMode.Vertex)
+        else if (_editMode == EditMode.Vertex)
             DrawVertexHandles();
         else
             DrawUVHandles();
@@ -163,12 +341,12 @@ public class GroundMeshEditor : Editor
             }
             else if (e.keyCode == KeyUndo)
             {
-                ground.UndoHistory();
+                UndoHistory();
                 e.Use();
             }
             else if (e.keyCode == KeyRedo)
             {
-                ground.RedoHistory();
+                RedoHistory();
                 e.Use();
             }
             else if (e.keyCode == KeyCode.RightControl)
@@ -204,34 +382,11 @@ public class GroundMeshEditor : Editor
         if ((e.type == EventType.mouseDown || e.type == EventType.mouseDrag) && e.button == 0)
         {
             if (_editMode == EditMode.Vertex)
-            {
-                ground.SetVertex(_mouse);
-            }
+                SetVertex(_mouse);
             else
-                ground.SetUV(_mouse, _selectedTexIdx, _texRotation);
+                SetUV(_mouse, _selectedTexIdx, _texRotation);
 
             e.Use();
-        }
-    }
-    
-    private void Init()
-    {
-        if (_init)
-            return;
-
-        _init = true;
-
-        Tools.current = Tool.View;
-
-        var ground = target as GroundMesh;
-        ground.CacheIndex();
-
-        var mesh = ground.GetComponent<MeshFilter>().sharedMesh;
-        if (mesh != null)
-        {
-            ground.vertices = new List<Vector3>(mesh.vertices);
-            ground.uv = new List<Vector2>(mesh.uv);
-            ground.triangles = new List<int>(mesh.triangles);
         }
     }
     
@@ -239,14 +394,12 @@ public class GroundMeshEditor : Editor
     {
         GUILayout.BeginVertical();
 
-        var ground = target as GroundMesh;
-
-        if (_lock)
+        if (_editMode == EditMode.Lock)
         {
             GUI.color = Color.red;
             if (GUILayout.Button("Lock", GUILayout.MinWidth(320)))
             {
-                _lock = !_lock;
+                _editMode = EditMode.Vertex;
             }
             GUI.color = Color.white;
             GUILayout.EndVertical();
@@ -264,9 +417,9 @@ public class GroundMeshEditor : Editor
 
         GUILayout.BeginHorizontal();
         if (GUILayout.Button(string.Format("Undo ({0})", KeyUndo)))
-            ground.UndoHistory();
+            UndoHistory();
         if (GUILayout.Button(string.Format("Redo ({0})", KeyRedo)))
-            ground.RedoHistory();
+            RedoHistory();
         GUILayout.EndHorizontal();
 
         DrawBrushGUI();
@@ -404,12 +557,12 @@ public class GroundMeshEditor : Editor
                 int vz = Mathf.RoundToInt(_mouse.z + sy);
                 var key = string.Format(ground.KeyFormat, vx, vz);
                 var currentY = 0f;
-                if (ground._indexCache.ContainsKey(key))
+                if (_indexCache.ContainsKey(key))
                 {
-                    var list = ground._indexCache[key];
+                    var list = _indexCache[key];
                     foreach (var i in list)
                     {
-                        var v = ground.vertices[i];
+                        var v = _vertices[i];
                         currentY = v.y;
                         break;
                     }
@@ -462,12 +615,12 @@ public class GroundMeshEditor : Editor
                 
                 var key = string.Format(ground.KeyFormat, vx, vz);
                 var currentY = 0f;
-                if (ground._indexCache.ContainsKey(key))
+                if (_indexCache.ContainsKey(key))
                 {
-                    var list = ground._indexCache[key];
+                    var list = _indexCache[key];
                     foreach (var i in list)
                     {
-                        var v = ground.vertices[i];
+                        var v = _vertices[i];
                         currentY = v.y;
                         break;
                     }
@@ -483,6 +636,121 @@ public class GroundMeshEditor : Editor
                 Handles.DrawLine(new Vector3(vx, currentY, vz + 1), new Vector3(vx, currentY, vz));
             }
         }
+    }
+    
+    public void SetVertex(Vector3 mouse)
+    {
+        var ground = target as GroundMesh;
+        var brushSize = ground._brushSize;
+        var brushHeight = ground._brushHeight;
+
+        bool dirty = false;
+        for (int row = 0; row < brushSize; ++row)
+        {
+            for (int col = 0; col < brushSize; ++col)
+            {
+                var sx = col;
+                var sy = row;
+                sx -= brushSize / 2;
+                sy -= brushSize / 2;
+                int vx = Mathf.RoundToInt(mouse.x + sx);
+                int vz = Mathf.RoundToInt(mouse.z + sy);
+                
+                var key = string.Format(ground.KeyFormat, vx, vz);
+                if (!_indexCache.ContainsKey(key))
+                    continue;
+                
+                var list = _indexCache[key];
+                foreach (var i in list)
+                {
+                    if (!dirty)
+                    {
+                        dirty = true;
+                        if (Event.current.type == EventType.mouseDown)
+                            RegisterHistory();
+                    }
+                    
+                    var v = _vertices[i];
+                    v.y = brushHeight;
+                    _vertices[i] = v;
+                }
+            }
+        }
+        
+        UpdateMesh();
+    }
+    
+    public void SetUV(Vector3 mouse, int texIdx, int texRotation)
+    {
+        var ground = target as GroundMesh;
+        var brushSize = ground._brushSize;
+
+        bool dirty = false;
+        for (int row = 0; row < brushSize; ++row)
+        {
+            for (int col = 0; col < brushSize; ++col)
+            {
+                if (row + 1 >= brushSize || col + 1 >= brushSize)
+                    continue;
+                
+                var sx = col;
+                var sy = row;
+                sx -= brushSize / 2;
+                sy -= brushSize / 2;
+                int vx = Mathf.RoundToInt(mouse.x + sx + 0.5f);
+                int vz = Mathf.RoundToInt(mouse.z + sy + 0.5f);
+                
+                var idx = vx  * 4 + (ground._cols * 4 * vz);
+                if (vx < 0 
+                    || vx >= ground._cols 
+                    || vz < 0 
+                    || vz >= ground._rows)
+                    continue;
+                
+                float c = (float)ground.texCountPerRow;
+                float i = (float)texIdx;
+                float x = i % c;
+                float y = Mathf.Floor(i / c);
+                
+                if (!dirty)
+                {
+                    dirty = true;
+                    if (Event.current.type == EventType.mouseDown)
+                        RegisterHistory();
+                }
+                
+                if (texRotation == 0)
+                {
+                    _uv[idx] = new Vector2(x / c, y / c);
+                    _uv[idx + 1] = new Vector2((x + 1) / c, y / c);
+                    _uv[idx + 2] = new Vector2((x + 1) / c, (y + 1) / c);
+                    _uv[idx + 3] = new Vector2(x / c, (y + 1) / c);
+                }
+                else if (texRotation == 90)
+                {
+                    _uv[idx] = new Vector2((x + 1) / c, y / c);
+                    _uv[idx + 1] = new Vector2((x + 1) / c, (y + 1) / c);
+                    _uv[idx + 2] = new Vector2(x / c, (y + 1) / c);
+                    _uv[idx + 3] = new Vector2(x / c, y / c);
+                }
+                else if (texRotation == 180)
+                {
+                    _uv[idx] = new Vector2((x + 1) / c, (y + 1) / c);
+                    _uv[idx + 1] = new Vector2(x / c, (y + 1) / c);
+                    _uv[idx + 2] = new Vector2(x / c, y / c);
+                    _uv[idx + 3] = new Vector2((x + 1) / c, y / c);
+                }
+                else
+                {
+                    _uv[idx] = new Vector2(x / c, (y + 1) / c);
+                    _uv[idx + 1] = new Vector2(x / c, y / c);
+                    _uv[idx + 2] = new Vector2((x + 1) / c, y / c);
+                    _uv[idx + 3] = new Vector2((x + 1) / c, (y + 1) / c);
+                }
+            }
+        }
+        
+        UpdateMesh();
     }
 
     private void DrawCursorIndex()
@@ -505,5 +773,56 @@ public class GroundMeshEditor : Editor
         {
             _editMode = EditMode.Vertex;
         }
+    }
+
+    public Dictionary<string, List<int>> GetIndexDict()
+    {
+        var ground = target as GroundMesh;
+        var dict = new Dictionary<string, List<int>>();
+        var key = "";
+        for (var i = 0; i < _vertices.Count; ++i)
+        {
+            var v = _vertices[i];
+            key = string.Format(ground.KeyFormat, v.x, v.z);
+            if (!dict.ContainsKey(key))
+                dict[key] = new List<int>();
+            
+            dict[key].Add(i);
+        }
+        
+        return dict;
+    }
+
+    private void RegisterHistory()
+    {
+        var ground = target as GroundMesh;
+        ground.RegisterHistory(_vertices, _uv);
+        EditorUtility.SetDirty(target);
+    }
+
+    private void UndoHistory()
+    {
+        var ground = target as GroundMesh;
+        var item = ground.UndoHistory(_vertices, _uv);
+        if (item.vertices != null)
+        {
+            _vertices = item.vertices;
+            _uv = item.uv;
+            ground.UpdateMesh(_vertices, _uv, _triangles);
+        }
+        EditorUtility.SetDirty(target);
+    }
+    
+    private void RedoHistory()
+    {
+        var ground = target as GroundMesh;
+        var item = ground.RedoHistory();
+        if (item.vertices != null)
+        {
+            _vertices = item.vertices;
+            _uv = item.uv;
+            ground.UpdateMesh(_vertices, _uv, _triangles);
+        }
+        EditorUtility.SetDirty(target);
     }
 }
