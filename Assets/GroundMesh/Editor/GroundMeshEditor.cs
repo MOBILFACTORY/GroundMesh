@@ -90,7 +90,7 @@ public class GroundMeshEditor : Editor
         }
         else if (GUILayout.Button("Init UV"))
         {
-            if (!EditorUtility.DisplayDialog("Init UV", "Are you sure?", "New", "Cancel"))
+            if (!EditorUtility.DisplayDialog("Init UV", "Are you sure?", "Init UV", "Cancel"))
                 return;
             
             InitUV();
@@ -239,18 +239,13 @@ public class GroundMeshEditor : Editor
     {
         var ground = target as GroundMesh;
 
-        _uv.Clear();
-        
         var c = (float)ground.texCountPerRow;
-        for (int y = 0; y < ground.rows; ++y)
+        for (int i = 0; i < _uv.Count; i+=4)
         {
-            for (int x = 0; x < ground.cols; ++x)
-            {        
-                _uv.Add(new Vector2(0f, 0f));
-                _uv.Add(new Vector2(1f / c, 0f));
-                _uv.Add(new Vector2(1f / c, 1f / c));
-                _uv.Add(new Vector2(0f, 1f / c));
-            }
+            _uv[i + 0] = new Vector2(0f, 0f);
+            _uv[i + 1] = new Vector2(1f / c, 0f);
+            _uv[i + 2] = new Vector2(1f / c, 1f / c);
+            _uv[i + 3] = new Vector2(0f, 1f / c);
         }
         
         UpdateMesh();
