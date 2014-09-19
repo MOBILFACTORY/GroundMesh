@@ -126,11 +126,40 @@ namespace MobilFactory
                 return;
 
             var zoom = ((float)zooms[zoomIndex]) * 0.01f;
-            var rect = new Rect(LeftbarSize, 
-                                ToolbarSize, 
-                                tex.width * zoom, 
-                                tex.height * zoom);
-            GUI.DrawTexture(rect, tex);
+//            var rect = new Rect(LeftbarSize, 
+//                                ToolbarSize, 
+//                                tex.width * zoom, 
+//                                tex.height * zoom);
+//            GUI.DrawTexture(rect, tex);
+
+            int beginX = LeftbarSize;
+            int beginY = ToolbarSize + 1;
+            int margin = 0;
+            int size = (int)(target.tileSize * zoom);
+            int idx = 0;
+            int col = 0;
+            int row = 0;
+            for (int y = 0; y < target.columnCount; ++y)
+            {
+                for (int x = 0; x < target.columnCount; ++x)
+                {
+                    var rect = new Rect((size + margin) * col + beginX, 
+                                        (size + margin) * row + beginY, 
+                                        size, size);
+                    
+                    var c = (float)target.columnCount;
+                    var texCoords = new Rect((float)x / c, (float)y / c, 1f / c, 1f / c);
+                    GUI.DrawTextureWithTexCoords(rect, tex, texCoords);
+                    
+                    idx++;
+                    col++;
+                    if (col == target.columnCount)
+                    {
+                        col = 0;
+                        row++;
+                    }
+                }
+            }
         }
 
         private void OnCursorGUI()

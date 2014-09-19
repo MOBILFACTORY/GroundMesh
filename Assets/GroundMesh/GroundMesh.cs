@@ -44,6 +44,8 @@ namespace MobilFactory
         public List<HistoryItem> _histories = new List<HistoryItem>();
         [HideInInspector]
         public bool _isPresentHistory = true;
+        [HideInInspector]
+        public List<string> _terrains = new List<string>();
         
         public void UpdateMesh(List<Vector3> vertices, List<Vector2> uv, List<int> triangles)
         {

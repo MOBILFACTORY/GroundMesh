@@ -19,7 +19,7 @@ namespace MobilFactory
             GUILayout.Label("Select Material");
             mat = EditorGUILayout.ObjectField(mat, typeof(Material), false) as Material;
 
-            tileSize = EditorGUILayout.IntField("Tile size", tileSize);
+            tileSize = EditorGUILayout.IntField("Tile size (pixel)", tileSize);
             columnCount = EditorGUILayout.IntField("Column count", columnCount);
 
             GUILayout.FlexibleSpace();
