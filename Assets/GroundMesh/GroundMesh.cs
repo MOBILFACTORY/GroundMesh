@@ -21,13 +21,13 @@ namespace MobilFactory
         {
             public List<Vector3> vertices;
             public List<Vector2> uv;
+            public List<string> terrains;
         }
 
         public readonly int HistoryLimit = 50;
 
         public int cols = 10;
         public int rows = 10;
-        public int texCountPerRow = 1;
         [HideInInspector]
         public int _cols;
         [HideInInspector]
@@ -66,11 +66,13 @@ namespace MobilFactory
             mesh.Optimize();
         }
         
-        public void RegisterHistory(List<Vector3> vertices, List<Vector2> uv)
+        public void RegisterHistory(List<Vector3> vertices, List<Vector2> uv, List<string> terrains)
         {
             var item = new HistoryItem();
             item.vertices = new List<Vector3>(vertices);
             item.uv = new List<Vector2>(uv);
+            item.terrains = new List<string>(terrains);
+
             _histories.Insert(0, item);
             if (_histories.Count > HistoryLimit)
                 _histories.RemoveAt(HistoryLimit);
@@ -94,11 +96,11 @@ namespace MobilFactory
             _historyIndex = 0;
         }
         
-        public HistoryItem UndoHistory(List<Vector3> vertices, List<Vector2> uv)
+        public HistoryItem UndoHistory(List<Vector3> vertices, List<Vector2> uv, List<string> terrains)
         {
             if (_isPresentHistory)
             {
-                RegisterHistory(vertices, uv);
+                RegisterHistory(vertices, uv, terrains);
                 _isPresentHistory = false;
             }
             
@@ -113,6 +115,7 @@ namespace MobilFactory
             var newItem = new HistoryItem();
             newItem.vertices = new List<Vector3>(item.vertices);
             newItem.uv = new List<Vector2>(item.uv);
+            newItem.terrains = new List<string>(item.terrains);
 
             return newItem;
         }

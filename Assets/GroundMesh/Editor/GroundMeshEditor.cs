@@ -157,7 +157,7 @@ namespace MobilFactory
             _uv.Clear();
             _triangles.Clear();
 
-            var c = (float)ground.texCountPerRow;
+            var c = (float)ground.tileset.columnCount;
             var i = 0;
             for (int y = 0; y < ground.rows; ++y)
             {
@@ -206,7 +206,7 @@ namespace MobilFactory
             _uv.Clear();
             _triangles.Clear();
             
-            var c = (float)ground.texCountPerRow;
+            var c = (float)ground.tileset.columnCount;
             var i = 0;
             for (int y = 0; y < ground.rows; ++y)
             {
@@ -913,6 +913,13 @@ namespace MobilFactory
                         || vz < 0 
                         || vz >= ground._rows)
                         continue;
+
+                    if (!dirty)
+                    {
+                        dirty = true;
+                        if (Event.current.type == EventType.mouseDown)
+                            RegisterHistory();
+                    }
                     
                     float c = (float)ground.tileset.columnCount;
                     float i = (float)texIdx;
@@ -920,13 +927,6 @@ namespace MobilFactory
                     float y = Mathf.Floor(i / c);
 
                     ground._terrains[terrainIdx] = str;
-                    
-                    if (!dirty)
-                    {
-                        dirty = true;
-                        if (Event.current.type == EventType.mouseDown)
-                            RegisterHistory();
-                    }
                     
                     _uv[idx] = new Vector2(x / c, y / c);
                     _uv[idx + 1] = new Vector2((x + 1) / c, y / c);
@@ -980,18 +980,20 @@ namespace MobilFactory
         private void RegisterHistory()
         {
             var ground = target as GroundMesh;
-            ground.RegisterHistory(_vertices, _uv);
+            ground.RegisterHistory(_vertices, _uv, ground._terrains);
             EditorUtility.SetDirty(target);
         }
 
         private void UndoHistory()
         {
             var ground = target as GroundMesh;
-            var item = ground.UndoHistory(_vertices, _uv);
+            var item = ground.UndoHistory(_vertices, _uv, ground._terrains);
             if (item.vertices != null)
             {
                 _vertices = item.vertices;
                 _uv = item.uv;
+                ground._terrains = item.terrains;
+
                 ground.UpdateMesh(_vertices, _uv, _triangles);
             }
             EditorUtility.SetDirty(target);
