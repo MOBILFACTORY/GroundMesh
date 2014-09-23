@@ -71,7 +71,8 @@ namespace MobilFactory
                 _triangles = new List<int>();
             }
 
-            ground.renderer.sharedMaterial = ground.tileset.material;
+            if (ground.tileset != null && ground.tileset.material != null)
+                ground.renderer.sharedMaterial = ground.tileset.material;
 
             _indexCache = GetIndexDict();
         }

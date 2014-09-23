@@ -19,6 +19,9 @@ namespace MobilFactory
         public Tileset tileset {
             get
             {
+                if (_tileset == null)
+                    return null;
+
                 return _tileset.GetComponent<Tileset>();
             }
         }
