@@ -9,11 +9,18 @@ namespace MobilFactory
     [RequireComponent(typeof(MeshRenderer))]
     public class GroundMesh : MonoBehaviour
     {
-        public Tileset tileset;
+        public GameObject _tileset;
 
         [ContextMenu ("Do Something")]
         void DoSomething () {
             Debug.Log ("Perform operation");
+        }
+
+        public Tileset tileset {
+            get
+            {
+                return _tileset.GetComponent<Tileset>();
+            }
         }
 
     #if UNITY_EDITOR

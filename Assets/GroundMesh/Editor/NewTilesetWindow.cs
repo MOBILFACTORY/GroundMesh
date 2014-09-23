@@ -49,7 +49,7 @@ namespace MobilFactory
             PrefabUtility.ReplacePrefab(go, prefab, ReplacePrefabOptions.ConnectToPrefab);
             GameObject.DestroyImmediate(go);
 
-            target.tileset = AssetDatabase.LoadAssetAtPath(path, typeof(Tileset)) as Tileset;
+            target._tileset = AssetDatabase.LoadAssetAtPath(path, typeof(GameObject)) as GameObject;
             target.renderer.sharedMaterial = mat;
         }
     }

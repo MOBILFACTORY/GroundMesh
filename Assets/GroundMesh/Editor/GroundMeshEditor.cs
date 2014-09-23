@@ -9,13 +9,6 @@ namespace MobilFactory
     [CustomEditor(typeof(GroundMesh))]
     public class GroundMeshEditor : Editor
     {
-        private enum EditMode
-        {
-            Lock,
-            Vertex,
-            UV,
-        }
-
         private enum TilesetMode
         {
             Tile,
@@ -27,7 +20,6 @@ namespace MobilFactory
         private readonly float CapSizeHalf = 0.1f;
         private readonly Quaternion CapRotationUp = Quaternion.Euler(270, 0, 0);
         private readonly Quaternion CapRotationBottom = Quaternion.Euler(90, 0, 0);
-        private readonly KeyCode KeyToggleEditMode = KeyCode.Tab;
         private readonly KeyCode KeyBrushHeightUp = KeyCode.W;
         private readonly KeyCode KeyBrushHeightDown = KeyCode.S;
         private readonly KeyCode KeyBrushHeightReset = KeyCode.R;
@@ -37,8 +29,10 @@ namespace MobilFactory
         private readonly KeyCode KeyBrushRotatePlus = KeyCode.E;
         private readonly KeyCode KeyUndo = KeyCode.Z;
         private readonly KeyCode KeyRedo = KeyCode.Y;
-        
-        private EditMode _editMode = EditMode.Lock;
+
+        private bool _lock = true;
+        private bool _drawHeight = true;
+        private bool _drawTile = false;
         private Rect _winsize = new Rect(10, 30, 10, 10);
         private Vector3 _mouse;
         private Matrix4x4 _worldToLocal;
@@ -77,6 +71,8 @@ namespace MobilFactory
                 _triangles = new List<int>();
             }
 
+            ground.renderer.sharedMaterial = ground.tileset.material;
+
             _indexCache = GetIndexDict();
         }
 
@@ -86,14 +82,7 @@ namespace MobilFactory
 
             base.OnInspectorGUI();
 
-            if (GUILayout.Button("Create Tileset"))
-            {
-                var win = EditorWindow.GetWindow<NewTilesetWindow>("New Tileset");
-                win.target = target as GroundMesh;
-                Event.current.Use();
-            }
-
-            GUILayout.Space(12);
+            GUILayout.Space(10);
 
             if (GUILayout.Button("New Mesh"))
             {
@@ -114,44 +103,41 @@ namespace MobilFactory
                 ResizeMesh();
             }
             
-            GUILayout.Space(12);
+            GUILayout.Space(10);
 
-            if (GUILayout.Button("Init UV"))
-            {
-                if (!EditorUtility.DisplayDialog("Init UV", "Are you sure?", "Init UV", "Cancel"))
-                    return;
-                
-                InitUV();
-            }
-            else if (GUILayout.Button("Create MeshCollider"))
+            if (GUILayout.Button("Create MeshCollider"))
             {
                 if (ground.GetComponent<MeshCollider>() != null)
                     DestroyImmediate(ground.GetComponent<MeshCollider>());
 
                 ground.gameObject.AddComponent<MeshCollider>();
             }
-            else if (GUILayout.Button(string.Format("Clean History ({0}/{1})", ground._historyIndex, ground._histories.Count)))
+
+            GUILayout.Space(10);
+
+            if (GUILayout.Button(string.Format("Clean History ({0}/{1})", ground._historyIndex, ground._histories.Count)))
             {
                 ground.ClearHistory();
                 EditorUtility.UnloadUnusedAssets();
             }
-        }
 
-        public void DestroyCollider()
-        {
-            var ground = target as GroundMesh;
-
-            if (ground.GetComponent<MeshCollider>() != null)
-                DestroyImmediate(ground.GetComponent<MeshCollider>());
-
-            EditorUtility.UnloadUnusedAssets();
+            GUILayout.Space(10);
+            
+            if (GUILayout.Button("Create Tileset"))
+            {
+                var win = EditorWindow.GetWindow<NewTilesetWindow>("New Tileset");
+                win.target = target as GroundMesh;
+                Event.current.Use();
+            }
         }
 
         public void NewMesh()
         {
-            DestroyCollider();
-
             var ground = target as GroundMesh;
+            if (ground.GetComponent<MeshCollider>() != null)
+                DestroyImmediate(ground.GetComponent<MeshCollider>());
+            
+            EditorUtility.UnloadUnusedAssets();
             
             _vertices.Clear();
             _uv.Clear();
@@ -184,10 +170,13 @@ namespace MobilFactory
                 }
             }
 
+            var defaultTerrain = "-1,-1,-1,-1";
+            if (ground.tileset.terrainNames.Count > 0)
+                defaultTerrain = "0,0,0,0";
             ground._terrains.Clear();
             for (i = 0; i < ground.cols * ground.rows; ++i)
             {
-                ground._terrains.Add("-1,-1,-1,-1");
+                ground._terrains.Add(defaultTerrain);
             }
 
             UpdateMesh();
@@ -195,9 +184,11 @@ namespace MobilFactory
         
         public void ResizeMesh()
         {
-            DestroyCollider();
-
             var ground = target as GroundMesh;
+            if (ground.GetComponent<MeshCollider>() != null)
+                DestroyImmediate(ground.GetComponent<MeshCollider>());
+            
+            EditorUtility.UnloadUnusedAssets();
 
             var oldVertices = new List<Vector3>(_vertices);
             var oldUV = new List<Vector2>(_uv);
@@ -265,30 +256,15 @@ namespace MobilFactory
                 }
             }
 
+            var oldTerrains = new List<string>(ground._terrains);
             ground._terrains.Clear();
             for (i = 0; i < ground.cols * ground.rows; ++i)
             {
-                ground._terrains.Add("-1,-1,-1,-1");
+                ground._terrains.Add(oldTerrains[i]);
             }
 
             UpdateMesh();
             ground.ClearHistory();
-        }
-
-        private void InitUV()
-        {
-            var ground = target as GroundMesh;
-
-            var c = (float)ground.tileset.columnCount;
-            for (int i = 0; i < _uv.Count; i+=4)
-            {
-                _uv[i + 0] = new Vector2(0f, 0f);
-                _uv[i + 1] = new Vector2(1f / c, 0f);
-                _uv[i + 2] = new Vector2(1f / c, 1f / c);
-                _uv[i + 3] = new Vector2(0f, 1f / c);
-            }
-            
-            UpdateMesh();
         }
 
         private void UpdateMesh()
@@ -305,22 +281,21 @@ namespace MobilFactory
 
         private void OnSceneGUI()
         {
-            if (_editMode != EditMode.Lock)
+            if (!_lock)
             {
                 OnKey();
                 OnMouse();
             }
 
-            GUILayout.Window(0, _winsize, DrawWindow, "Ground Mesh Editor");
-
+            GUILayout.Window(0, _winsize, OnWindowGUI, "Ground Mesh Editor");
             DrawCursorIndex();
 
-            if (_editMode == EditMode.Lock)
+            if (_lock)
                 return;
-            else if (_editMode == EditMode.Vertex)
-                DrawVertexHandles();
-            else
-                DrawUVHandles();
+            if (_drawHeight)
+                OnHeightHandles();
+            if (_drawTile)
+                OnTileHandles();
         }
         
         private void OnKey()
@@ -330,12 +305,7 @@ namespace MobilFactory
             var ground = target as GroundMesh;
             if (e.type == EventType.KeyDown)
             {
-                if (e.keyCode == KeyToggleEditMode)
-                {
-                    ToggleEditMode();
-                    e.Use();
-                }
-                else if (e.keyCode == KeyBrushSizeUp)
+                if (e.keyCode == KeyBrushSizeUp)
                 {
                     ground._brushSize = Mathf.Min(20, ground._brushSize + 1);
                     e.Use();
@@ -416,9 +386,10 @@ namespace MobilFactory
 
             if ((e.type == EventType.mouseDown || e.type == EventType.mouseDrag) && e.button == 0)
             {
-                if (_editMode == EditMode.Vertex)
+                if (_drawHeight)
                     SetVertex(_mouse);
-                else
+
+                if (_drawTile)
                 {
                     if (_tilesetMode == TilesetMode.Tile)
                         SetUV(_mouse, _selectedTexIdx);
@@ -432,43 +403,22 @@ namespace MobilFactory
             }
         }
         
-        private void DrawWindow(int a)
+        private void OnWindowGUI(int id)
         {
             GUILayout.BeginVertical(GUILayout.Width(320));
 
-            if (_editMode == EditMode.Lock)
+            if (_lock)
             {
                 GUI.color = Color.red;
-                if (GUILayout.Button("Lock", GUILayout.MinWidth(320)))
+                if (GUILayout.Button("Unlock", GUILayout.MinWidth(320)))
                 {
-                    _editMode = EditMode.Vertex;
+                    _lock = false;
                 }
                 GUI.color = Color.white;
                 GUILayout.EndVertical();
                 return;
             }
-
-            GUILayout.Space(10);
-
-            GUILayout.BeginHorizontal();
-            GUI.color = _editMode == EditMode.Vertex ? Color.green : Color.white;
-            if (GUILayout.Button("Edit Vertex"))
-            {
-                _editMode = EditMode.Vertex;
-            }
-            GUI.color = _editMode == EditMode.UV ? Color.green : Color.white;
-            if (GUILayout.Button("Edit UV"))
-            {
-                _editMode = EditMode.UV;
-                var ground = target as GroundMesh;
-                if (ground._brushSize == 1)
-                    ground._brushSize = 2;
-            }
-            GUILayout.EndHorizontal();
-            GUI.color = Color.white;
-
-            GUILayout.Space(10);
-
+            
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(string.Format("Undo ({0})", KeyUndo)))
                 UndoHistory();
@@ -476,54 +426,69 @@ namespace MobilFactory
                 RedoHistory();
             GUILayout.EndHorizontal();
 
-            if (_editMode == EditMode.Vertex)
+            GUILayout.Space(10);
+
+            GUILayout.BeginHorizontal();
+            GUI.color = _drawHeight ? Color.green : Color.white;
+            if (GUILayout.Button("Draw Height"))
             {
-                DrawBrushGUI();
+                _drawHeight = !_drawHeight;
             }
-            else
+            GUI.color = Color.white;
+            GUI.color = _drawTile ? Color.green : Color.white;
+            if (GUILayout.Button("Draw Tiles"))
             {
-                DrawTextureGUI();
+                _drawTile = !_drawTile;
             }
+            GUI.color = Color.white;
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(10);
+
+            OnBrushGUI();
+
+            GUILayout.Space(10);
+
+            if (_drawTile)
+                OnTileGUI();
             
             GUILayout.EndVertical();
         }
         
-        private void DrawBrushGUI()
+        private void OnBrushGUI()
         {
             var ground = target as GroundMesh;
 
-            GUILayout.Space(4);
+            if (_drawHeight)
+            {
+                GUILayout.BeginHorizontal();
+                ground._brushHeightUnit = EditorGUILayout.FloatField("Height Unit ", ground._brushHeightUnit);
+                GUILayout.EndHorizontal();
 
-            GUILayout.Label("Brush");
+                GUILayout.BeginHorizontal();
+                ground._brushHeight = EditorGUILayout.FloatField("Height ", ground._brushHeight);
+                if (GUILayout.Button(string.Format("+ ({0})", KeyBrushHeightUp)))
+                    ground._brushHeight += ground._brushHeightUnit;
+                if (GUILayout.Button(string.Format("- ({0})", KeyBrushHeightDown)))
+                    ground._brushHeight -= ground._brushHeightUnit;
+                if (GUILayout.Button(string.Format("Reset ({0})", KeyBrushHeightReset)))
+                    ground._brushHeight = 0f;
+                GUILayout.EndHorizontal();
+            }
 
-            GUILayout.BeginHorizontal();
-            ground._brushHeightUnit = EditorGUILayout.FloatField("Height Unit ", ground._brushHeightUnit);
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(4);
-
-            GUILayout.BeginHorizontal();
-            ground._brushHeight = EditorGUILayout.FloatField("Height ", ground._brushHeight);
-            if (GUILayout.Button(string.Format("+ ({0})", KeyBrushHeightUp)))
-                ground._brushHeight += ground._brushHeightUnit;
-            if (GUILayout.Button(string.Format("- ({0})", KeyBrushHeightDown)))
-                ground._brushHeight -= ground._brushHeightUnit;
-            if (GUILayout.Button(string.Format("Reset ({0})", KeyBrushHeightReset)))
-                ground._brushHeight = 0f;
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(4);
-
-            GUILayout.BeginHorizontal();
-            ground._brushSize = EditorGUILayout.IntField("Size ", ground._brushSize);
-            if (GUILayout.Button(string.Format("+ ({0})", KeyBrushSizeUp)))
-                ground._brushSize = Mathf.Min(20, ground._brushSize + 1);
-            if (GUILayout.Button(string.Format("- ({0})", KeyBrushSizeDown)))
-                ground._brushSize = Mathf.Max(1, ground._brushSize - 1);
-            GUILayout.EndHorizontal();
+            if (_drawHeight || _drawTile)
+            {
+                GUILayout.BeginHorizontal();
+                ground._brushSize = EditorGUILayout.IntField("Size ", ground._brushSize);
+                if (GUILayout.Button(string.Format("+ ({0})", KeyBrushSizeUp)))
+                    ground._brushSize = Mathf.Min(20, ground._brushSize + 1);
+                if (GUILayout.Button(string.Format("- ({0})", KeyBrushSizeDown)))
+                    ground._brushSize = Mathf.Max(1, ground._brushSize - 1);
+                GUILayout.EndHorizontal();
+            }
         }
 
-        private void DrawTextureGUI()
+        private void OnTileGUI()
         {
             var ground = target as GroundMesh;
             if (ground == null || ground.renderer == null)
@@ -536,12 +501,6 @@ namespace MobilFactory
             var tex = ground.tileset.material.GetTexture(0);
             if (tex == null)
                 return;
-
-            GUILayout.Space(10);
-
-            EditorGUILayout.ObjectField(ground.tileset, typeof(Tileset), false);
-
-            GUILayout.Space(10);
 
             GUILayout.BeginHorizontal();
             GUI.color = _tilesetMode == TilesetMode.Tile ? Color.green : Color.white;
@@ -646,7 +605,7 @@ namespace MobilFactory
             GUILayout.EndScrollView();
         }
 
-        private void DrawVertexHandles()
+        private void OnHeightHandles()
         {
             var ground = target as GroundMesh;
             var brushHeight = ground._brushHeight;
@@ -704,31 +663,48 @@ namespace MobilFactory
             }
         }
 
-        private void DrawUVHandles()
+        private void OnTileHandles()
         {
+            var ground = target as GroundMesh;
+            var brushSize = ground._brushSize;
+            if (brushSize < 2)
+                return;
+
             SceneView.RepaintAll();
 
-            int vx = Mathf.RoundToInt(_mouse.x - 0.5f);
-            int vz = Mathf.RoundToInt(_mouse.z - 0.5f);
-            
-            var key = string.Format(KeyFormat, vx, vz);
-            var currentY = 0f;
-            if (_indexCache.ContainsKey(key))
+            for (int row = 0; row < brushSize; ++row)
             {
-                var list = _indexCache[key];
-                foreach (var i in list)
+                for (int col = 0; col < brushSize; ++col)
                 {
-                    var v = _vertices[i];
-                    currentY = v.y;
-                    break;
+                    var sx = col;
+                    var sy = row;
+                    sx -= brushSize / 2;
+                    sy -= brushSize / 2;
+                    int vx = Mathf.RoundToInt(_mouse.x + sx);
+                    int vz = Mathf.RoundToInt(_mouse.z + sy);
+                    var key = string.Format(KeyFormat, vx, vz);
+                    var currentY = 0f;
+                    if (_indexCache.ContainsKey(key))
+                    {
+                        var list = _indexCache[key];
+                        foreach (var i in list)
+                        {
+                            var v = _vertices[i];
+                            currentY = v.y;
+                            break;
+                        }
+                    }
+                    
+                    if (row + 1 >= brushSize || col + 1 >= brushSize)
+                        continue;
+                    
+                    Handles.color = Color.cyan;
+                    Handles.DrawLine(new Vector3(vx, currentY, vz), new Vector3(vx + 1, currentY, vz));
+                    Handles.DrawLine(new Vector3(vx + 1, currentY, vz), new Vector3(vx + 1, currentY, vz + 1));
+                    Handles.DrawLine(new Vector3(vx + 1, currentY, vz + 1), new Vector3(vx, currentY, vz + 1));
+                    Handles.DrawLine(new Vector3(vx, currentY, vz + 1), new Vector3(vx, currentY, vz));
                 }
             }
-            
-            Handles.color = Color.cyan;
-            Handles.DrawLine(new Vector3(vx, currentY, vz), new Vector3(vx + 1, currentY, vz));
-            Handles.DrawLine(new Vector3(vx + 1, currentY, vz), new Vector3(vx + 1, currentY, vz + 1));
-            Handles.DrawLine(new Vector3(vx + 1, currentY, vz + 1), new Vector3(vx, currentY, vz + 1));
-            Handles.DrawLine(new Vector3(vx, currentY, vz + 1), new Vector3(vx, currentY, vz));
         }
         
         public void SetVertex(Vector3 mouse)
@@ -776,58 +752,69 @@ namespace MobilFactory
         public void SetUV(Vector3 mouse, int texIndex)
         {
             var ground = target as GroundMesh;
+            var brushSize = ground._brushSize;
+            if (brushSize < 2)
+                return;
 
             bool dirty = false;
 
-            int vx = Mathf.RoundToInt(mouse.x - 0.5f);
-            int vz = Mathf.RoundToInt(mouse.z - 0.5f);
-            
-            var idx = vx  * 4 + (ground._cols * 4 * vz);
-            if (vx < 0 
-                || vx >= ground._cols 
-                || vz < 0 
-                || vz >= ground._rows)
-                return;
-            
-            float c = (float)ground.tileset.columnCount;
-            float i = (float)texIndex;
-            float x = i % c;
-            float y = Mathf.Floor(i / c);
-            
-            if (!dirty)
+            for (int row = 0; row < brushSize - 1; ++row)
             {
-                dirty = true;
-                if (Event.current.type == EventType.mouseDown)
-                    RegisterHistory();
-            }
-            
-            if (_texRotation == 0)
-            {
-                _uv[idx] = new Vector2(x / c, y / c);
-                _uv[idx + 1] = new Vector2((x + 1) / c, y / c);
-                _uv[idx + 2] = new Vector2((x + 1) / c, (y + 1) / c);
-                _uv[idx + 3] = new Vector2(x / c, (y + 1) / c);
-            }
-            else if (_texRotation == 90)
-            {
-                _uv[idx] = new Vector2((x + 1) / c, y / c);
-                _uv[idx + 1] = new Vector2((x + 1) / c, (y + 1) / c);
-                _uv[idx + 2] = new Vector2(x / c, (y + 1) / c);
-                _uv[idx + 3] = new Vector2(x / c, y / c);
-            }
-            else if (_texRotation == 180)
-            {
-                _uv[idx] = new Vector2((x + 1) / c, (y + 1) / c);
-                _uv[idx + 1] = new Vector2(x / c, (y + 1) / c);
-                _uv[idx + 2] = new Vector2(x / c, y / c);
-                _uv[idx + 3] = new Vector2((x + 1) / c, y / c);
-            }
-            else
-            {
-                _uv[idx] = new Vector2(x / c, (y + 1) / c);
-                _uv[idx + 1] = new Vector2(x / c, y / c);
-                _uv[idx + 2] = new Vector2((x + 1) / c, y / c);
-                _uv[idx + 3] = new Vector2((x + 1) / c, (y + 1) / c);
+                for (int col = 0; col < brushSize - 1; ++col)
+                {
+                    var sx = col;
+                    var sy = row;
+                    sx -= brushSize / 2;
+                    sy -= brushSize / 2;
+                    int vx = Mathf.RoundToInt(_mouse.x + sx);
+                    int vz = Mathf.RoundToInt(_mouse.z + sy);
+
+                    var idx = vx  * 4 + (ground._cols * 4 * vz);
+                    if (vx < 0 || vx >= ground._cols 
+                        || vz < 0 || vz >= ground._rows)
+                        continue;
+
+                    float c = (float)ground.tileset.columnCount;
+                    float i = (float)texIndex;
+                    float x = i % c;
+                    float y = Mathf.Floor(i / c);
+                    
+                    if (!dirty)
+                    {
+                        dirty = true;
+                        if (Event.current.type == EventType.mouseDown)
+                            RegisterHistory();
+                    }
+                    
+                    if (_texRotation == 0)
+                    {
+                        _uv[idx] = new Vector2(x / c, y / c);
+                        _uv[idx + 1] = new Vector2((x + 1) / c, y / c);
+                        _uv[idx + 2] = new Vector2((x + 1) / c, (y + 1) / c);
+                        _uv[idx + 3] = new Vector2(x / c, (y + 1) / c);
+                    }
+                    else if (_texRotation == 90)
+                    {
+                        _uv[idx] = new Vector2((x + 1) / c, y / c);
+                        _uv[idx + 1] = new Vector2((x + 1) / c, (y + 1) / c);
+                        _uv[idx + 2] = new Vector2(x / c, (y + 1) / c);
+                        _uv[idx + 3] = new Vector2(x / c, y / c);
+                    }
+                    else if (_texRotation == 180)
+                    {
+                        _uv[idx] = new Vector2((x + 1) / c, (y + 1) / c);
+                        _uv[idx + 1] = new Vector2(x / c, (y + 1) / c);
+                        _uv[idx + 2] = new Vector2(x / c, y / c);
+                        _uv[idx + 3] = new Vector2((x + 1) / c, y / c);
+                    }
+                    else
+                    {
+                        _uv[idx] = new Vector2(x / c, (y + 1) / c);
+                        _uv[idx + 1] = new Vector2(x / c, y / c);
+                        _uv[idx + 2] = new Vector2((x + 1) / c, y / c);
+                        _uv[idx + 3] = new Vector2((x + 1) / c, (y + 1) / c);
+                    }
+                }
             }
             
             UpdateMesh();
@@ -836,104 +823,119 @@ namespace MobilFactory
         private void SetTerrain()
         {
             var ground = target as GroundMesh;
+            var brushSize = ground._brushSize;
+            if (brushSize < 2)
+                return;
             
             bool dirty = false;
-
-            for (var dirX = -1; dirX < 2; ++dirX)
+            
+            for (int row = 0; row < brushSize - 1; ++row)
             {
-                for (var dirY = -1; dirY < 2; ++dirY)
+                for (int col = 0; col < brushSize - 1; ++col)
                 {
-                    int vx = Mathf.RoundToInt(_mouse.x - 0.5f) + dirX;
-                    int vz = Mathf.RoundToInt(_mouse.z - 0.5f) + dirY;
-                    var terrainIdx = vx + vz * ground.rows;
-                    if (terrainIdx < 0 || terrainIdx >= ground._terrains.Count)
-                        continue;
-
-                    var currentTerrain = ground._terrains[terrainIdx].Split(',');
-                    var str = "";
-
-                    for (int arrIdx = 0; arrIdx < 4; ++arrIdx)
+                    for (var dirX = -1; dirX < 2; ++dirX)
                     {
-                        if (currentTerrain[arrIdx] == "-1")
-                            currentTerrain[arrIdx] = _selectedTexIdx.ToString();
+                        for (var dirY = -1; dirY < 2; ++dirY)
+                        {
+                            var sx = col;
+                            var sy = row;
+                            sx -= brushSize / 2;
+                            sy -= brushSize / 2;
+                            int vx = Mathf.RoundToInt(_mouse.x + sx) + dirX;
+                            int vz = Mathf.RoundToInt(_mouse.z + sy) + dirY;
+                            var terrainIdx = vx + vz * ground.rows;
+                            if (terrainIdx < 0 || terrainIdx >= ground._terrains.Count)
+                                continue;
+                            
+                            var currentTerrain = ground._terrains[terrainIdx].Split(',');
+                            var str = "";
+                            
+                            for (int arrIdx = 0; arrIdx < 4; ++arrIdx)
+                            {
+                                if (currentTerrain[arrIdx] == "-1")
+                                    currentTerrain[arrIdx] = _selectedTexIdx.ToString();
+                            }
+                            
+                            if (dirX == -1 && dirY == -1)
+                            {
+                                currentTerrain[1] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == 0 && dirY == -1)
+                            {
+                                currentTerrain[0] = _selectedTexIdx.ToString();
+                                currentTerrain[1] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == 1 && dirY == -1)
+                            {
+                                currentTerrain[0] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == -1 && dirY == 0)
+                            {
+                                currentTerrain[1] = _selectedTexIdx.ToString();
+                                currentTerrain[3] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == 0 && dirY == 0)
+                            {
+                                currentTerrain[0] = _selectedTexIdx.ToString();
+                                currentTerrain[1] = _selectedTexIdx.ToString();
+                                currentTerrain[2] = _selectedTexIdx.ToString();
+                                currentTerrain[3] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == 1 && dirY == 0)
+                            {
+                                currentTerrain[0] = _selectedTexIdx.ToString();
+                                currentTerrain[2] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == -1 && dirY == 1)
+                            {
+                                currentTerrain[3] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == 0 && dirY == 1)
+                            {
+                                currentTerrain[2] = _selectedTexIdx.ToString();
+                                currentTerrain[3] = _selectedTexIdx.ToString();
+                            }
+                            if (dirX == 1 && dirY == 1)
+                            {
+                                currentTerrain[2] = _selectedTexIdx.ToString();
+                            }
+                            str = string.Format("{0},{1},{2},{3}", currentTerrain[0], currentTerrain[1], currentTerrain[2], currentTerrain[3]);
+                            
+                            var texIdx = ground.tileset.tileTerrains.IndexOf(str);
+                            if (texIdx < 0)
+                                continue;
+                            
+                            var idx = vx * 4 + (ground._cols * 4 * vz);
+                            if (vx < 0 
+                                || vx >= ground._cols 
+                                || vz < 0 
+                                || vz >= ground._rows)
+                                continue;
+                            
+                            if (!dirty)
+                            {
+                                dirty = true;
+                                if (Event.current.type == EventType.mouseDown)
+                                    RegisterHistory();
+                            }
+                            
+                            float c = (float)ground.tileset.columnCount;
+                            float i = (float)texIdx;
+                            float x = i % c;
+                            float y = Mathf.Floor(i / c);
+                            
+                            ground._terrains[terrainIdx] = str;
+                            
+                            _uv[idx] = new Vector2(x / c, y / c);
+                            _uv[idx + 1] = new Vector2((x + 1) / c, y / c);
+                            _uv[idx + 2] = new Vector2((x + 1) / c, (y + 1) / c);
+                            _uv[idx + 3] = new Vector2(x / c, (y + 1) / c);
+                        }
                     }
-
-                    if (dirX == -1 && dirY == -1)
-                    {
-                        currentTerrain[1] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == 0 && dirY == -1)
-                    {
-                        currentTerrain[0] = _selectedTexIdx.ToString();
-                        currentTerrain[1] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == 1 && dirY == -1)
-                    {
-                        currentTerrain[0] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == -1 && dirY == 0)
-                    {
-                        currentTerrain[1] = _selectedTexIdx.ToString();
-                        currentTerrain[3] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == 0 && dirY == 0)
-                    {
-                        currentTerrain[0] = _selectedTexIdx.ToString();
-                        currentTerrain[1] = _selectedTexIdx.ToString();
-                        currentTerrain[2] = _selectedTexIdx.ToString();
-                        currentTerrain[3] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == 1 && dirY == 0)
-                    {
-                        currentTerrain[0] = _selectedTexIdx.ToString();
-                        currentTerrain[2] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == -1 && dirY == 1)
-                    {
-                        currentTerrain[3] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == 0 && dirY == 1)
-                    {
-                        currentTerrain[2] = _selectedTexIdx.ToString();
-                        currentTerrain[3] = _selectedTexIdx.ToString();
-                    }
-                    if (dirX == 1 && dirY == 1)
-                    {
-                        currentTerrain[2] = _selectedTexIdx.ToString();
-                    }
-                    str = string.Format("{0},{1},{2},{3}", currentTerrain[0], currentTerrain[1], currentTerrain[2], currentTerrain[3]);
-
-                    var texIdx = ground.tileset.tileTerrains.IndexOf(str);
-                    if (texIdx < 0)
-                        continue;
-                    
-                    var idx = vx * 4 + (ground._cols * 4 * vz);
-                    if (vx < 0 
-                        || vx >= ground._cols 
-                        || vz < 0 
-                        || vz >= ground._rows)
-                        continue;
-
-                    if (!dirty)
-                    {
-                        dirty = true;
-                        if (Event.current.type == EventType.mouseDown)
-                            RegisterHistory();
-                    }
-                    
-                    float c = (float)ground.tileset.columnCount;
-                    float i = (float)texIdx;
-                    float x = i % c;
-                    float y = Mathf.Floor(i / c);
-
-                    ground._terrains[terrainIdx] = str;
-                    
-                    _uv[idx] = new Vector2(x / c, y / c);
-                    _uv[idx + 1] = new Vector2((x + 1) / c, y / c);
-                    _uv[idx + 2] = new Vector2((x + 1) / c, (y + 1) / c);
-                    _uv[idx + 3] = new Vector2(x / c, (y + 1) / c);
                 }
             }
+            
+            UpdateMesh();
             
             UpdateMesh();
         }
@@ -943,21 +945,6 @@ namespace MobilFactory
             var ground = target as GroundMesh;
             Handles.Label(new Vector3(_mouse.x, ground._brushHeight, _mouse.z), 
                           string.Format("{0}, {1}", (int)_mouse.x, (int)_mouse.z));
-        }
-
-        private void ToggleEditMode()
-        {
-            var ground = target as GroundMesh;
-            if (_editMode == EditMode.Vertex)
-            {
-                _editMode = EditMode.UV;
-                if (ground._brushSize == 1)
-                    ground._brushSize = 2;
-            }
-            else
-            {
-                _editMode = EditMode.Vertex;
-            }
         }
 
         public Dictionary<string, List<int>> GetIndexDict()
