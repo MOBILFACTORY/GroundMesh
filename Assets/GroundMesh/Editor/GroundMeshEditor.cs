@@ -45,7 +45,7 @@ namespace MobilFactory
         private TilesetMode _tilesetMode = TilesetMode.Tile;
         private Vector2 _tilesetPos = Vector2.zero;
 
-        [MenuItem("GroundMesh/Create")]
+        [MenuItem("GameObject/Create Other/GroundMesh")]
         static private void Create()
         {
             var go = new GameObject("GroundMesh");
@@ -137,6 +137,9 @@ namespace MobilFactory
             var ground = target as GroundMesh;
             if (ground.GetComponent<MeshCollider>() != null)
                 DestroyImmediate(ground.GetComponent<MeshCollider>());
+
+            if (ground.tileset != null && ground.tileset.material != null)
+                ground.renderer.sharedMaterial = ground.tileset.material;
             
             EditorUtility.UnloadUnusedAssets();
             
@@ -780,7 +783,7 @@ namespace MobilFactory
                     float x = i % c;
                     float y = Mathf.Floor(i / c);
                     
-                    if (!dirty)
+                    if (!dirty && !_drawHeight)
                     {
                         dirty = true;
                         if (Event.current.type == EventType.mouseDown)
@@ -913,7 +916,7 @@ namespace MobilFactory
                                 || vz >= ground._rows)
                                 continue;
                             
-                            if (!dirty)
+                            if (!dirty && !_drawHeight)
                             {
                                 dirty = true;
                                 if (Event.current.type == EventType.mouseDown)
